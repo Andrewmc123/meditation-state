@@ -125,6 +125,21 @@
               color:var(--faint);font-size:9.5px;line-height:1.9}
   .jump{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:6px}
 
+  /* --- emote bar --- */
+  /* Sits above the breath pacer rather than beside it: at nine emotes the bar
+     wraps to two rows and any horizontal offset still collided with the ring. */
+  #emoteBar{position:absolute;bottom:182px;left:50%;transform:translateX(-50%);
+            display:none;gap:5px;pointer-events:auto;flex-wrap:wrap;
+            justify-content:center;max-width:min(720px,72vw)}
+  #emoteBar.on{display:flex}
+  .emoteKey{background:var(--panel);border:1px solid var(--line);border-radius:5px;
+            color:var(--dim);font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+            padding:7px 10px 6px;cursor:pointer;backdrop-filter:blur(9px);transition:.14s;
+            display:flex;flex-direction:column;align-items:center;gap:3px;min-width:52px}
+  .emoteKey b{font-size:8.5px;color:var(--flame);font-weight:500}
+  .emoteKey:hover{border-color:var(--flame);color:var(--ink)}
+  .emoteKey:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+
   /* --- controls panel --- */
   .bindGroup{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;
              color:var(--flame);margin:16px 0 7px;padding-bottom:5px;
@@ -168,7 +183,7 @@
         min-width:74px}
   .grp .sld{margin-top:9px}
 </style>
-  <script type="module" crossorigin src="./assets/index-01S5W0L0.js"></script>
+  <script type="module" crossorigin src="./assets/index-DTBezzCE.js"></script>
 </head>
 <body>
 
@@ -209,6 +224,8 @@
     </svg>
     <div id="breathTxt"><b id="bWord">in</b><span id="bRate">6.0 / min</span></div>
   </div>
+
+  <div id="emoteBar" class="on"></div>
 
   <div class="panel" id="mode">
     <div class="m" id="mName">Free roam</div>
@@ -273,6 +290,16 @@
         <div id="tuneList"></div>
         <button class="opt" id="resetAll" style="margin-top:10px">Reset everything</button>
       </div>
+    </div>
+
+    <div class="grp">
+      <span class="lbl">Character</span>
+      <div class="opts" id="optChar"></div>
+    </div>
+
+    <div class="grp">
+      <span class="lbl">Emotes &mdash; number keys, or <kbd>`</kbd> to hide the bar</span>
+      <div class="jump opts" id="emoteList"></div>
     </div>
 
     <div class="grp">
