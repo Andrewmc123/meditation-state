@@ -19,3 +19,6 @@ tools/raw/
 Thumbs.db
 .vscode/
 .idea/
+
+# Vite dependency pre-bundling cache
+.vite/

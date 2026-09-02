@@ -9,6 +9,7 @@ import { MeditationAudio, PRESETS } from './audio/MeditationAudio.js';
 import { Character } from './world/Character.js';
 import { Wardrobe } from './world/Wardrobe.js';
 import { SurfaceWorld, WORLDS } from './world/SurfaceWorld.js';
+import { CHARACTERS, emotesFor } from './world/CharacterLibrary.js';
 import { AU, KM } from './core/constants.js';
 import { Settings, ACTIONS, TUNABLES, prettyKey } from './core/Settings.js';
 
@@ -45,6 +46,7 @@ class Game {
     this.surface = new SurfaceWorld(this.engine, this.audio, this.settings);
     this.onSurface = false;
     this.thirdPerson = true;
+    this.charKey = localStorage.getItem('meditation-state.character') || 'xbot';
 
     this.mode = 'free';
     this.showHud = true;
@@ -79,7 +81,7 @@ class Game {
 
     step(0.96, 'waking the body');
     try {
-      await this.character.load();
+      await this.character.load(this.charKey);
       this.wardrobe.attach(this.character);
       this.character.setVisible(this.thirdPerson);
     } catch (e) {
@@ -283,6 +285,69 @@ class Game {
       $('tScaleV').textContent = fmtTimeScale(s);
     };
     $('tScale').dispatchEvent(new Event('input'));
+
+    // ---- character ----
+    const cw2 = $('optChar');
+    const paintChars = () => {
+      cw2.innerHTML = '';
+      for (const [k, c] of Object.entries(CHARACTERS)) {
+        const d = document.createElement('div');
+        d.className = 'opt' + (k === this.charKey ? ' sel' : '');
+        d.innerHTML = c.name + '<small>' + c.note + '</small>';
+        d.onclick = async () => {
+          if (k === this.charKey) return;
+          this.charKey = k;
+          localStorage.setItem('meditation-state.character', k);
+          paintChars();
+          await this.character.load(k);
+          this.wardrobe.attach(this.character);
+          this.character.setVisible(this.thirdPerson || this.onSurface);
+          if (this.onSurface) this.character.setPoseMode('surface');
+          this.applySettings();
+          buildEmoteBar();
+        };
+        cw2.appendChild(d);
+      }
+    };
+    paintChars();
+
+    // ---- emotes ----
+    const buildEmoteBar = () => {
+      const bar = $('emoteBar');
+      const list = $('emoteList');
+      bar.innerHTML = '';
+      list.innerHTML = '';
+      const es = emotesFor(this.charKey);
+      es.forEach((e, i) => {
+        const b = document.createElement('button');
+        b.className = 'emoteKey';
+        b.innerHTML = '<b>' + (i + 1) + '</b>' + e.label;
+        b.onclick = () => this.character.playEmote(e.key);
+        if (i < 9) bar.appendChild(b);
+
+        const d = document.createElement('div');
+        d.className = 'opt';
+        d.innerHTML = e.label + '<small>' + (e.note || (e.kind === 'clip' ? 'clip' : 'pose'))
+                    + (i < 9 ? ' &middot; key ' + (i + 1) : '') + '</small>';
+        d.onclick = () => { this.toggleMenu(false); this.character.playEmote(e.key); };
+        list.appendChild(d);
+      });
+      this._emoteOrder = es.map((e) => e.key);
+    };
+    buildEmoteBar();
+
+    // Number keys fire emotes. Deliberately not routed through the rebinding
+    // system: the mapping is positional, and it changes with the character.
+    window.addEventListener('keydown', (ev) => {
+      if (this._capturing) return;
+      if ($('menu').classList.contains('on')) return;
+      if (ev.code.startsWith('Digit')) {
+        const i = +ev.code.slice(5) - 1;
+        const k = this._emoteOrder?.[i];
+        if (k) this.character.playEmote(k);
+      }
+      if (ev.code === 'Backquote') $('emoteBar').classList.toggle('on');
+    });
 
     // ---- interstellar ----
     const iw = $('optStars');

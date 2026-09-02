@@ -93,7 +93,7 @@ async function main() {
   await mkdir(DATA, { recursive: true });
   await mkdir(RAW, { recursive: true });
 
-  console.log('\n[1/3] Planetary textures - Solar System Scope, CC BY 4.0');
+  console.log('\n[1/4] Planetary textures - Solar System Scope, CC BY 4.0');
   let ok = 0;
   // Serial: the host throttles parallel bursts and starts serving HTML error pages.
   for (const f of TEXTURES) {
@@ -101,10 +101,17 @@ async function main() {
   }
   console.log(`      ${ok}/${TEXTURES.length} textures`);
 
-  console.log('\n[2/3] HYG star catalogue v4.1 - astronexus, CC BY-SA 2.5');
+  console.log('\n[2/4] Rigged characters - three.js examples, MIT');
+  const MODELS_DIR = path.join(ROOT, 'public', 'models');
+  await mkdir(MODELS_DIR, { recursive: true });
+  for (const m of MODELS) {
+    await download(MODELS_BASE + m, path.join(MODELS_DIR, m.split('/').pop()), m.split('/').pop());
+  }
+
+  console.log('\n[3/4] HYG star catalogue v4.1 - astronexus, CC BY-SA 2.5');
   await download(HYG, path.join(RAW, 'hyg.csv'), 'hygdata_v41.csv');
 
-  console.log('\n[3/3] Confirmed exoplanets - NASA Exoplanet Archive, public domain');
+  console.log('\n[4/4] Confirmed exoplanets - NASA Exoplanet Archive, public domain');
   try {
     const url = `${EXO_TAP}?query=${encodeURIComponent(EXO_QUERY)}&format=json`;
     const res = await fetch(url, { headers: UA });

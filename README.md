@@ -62,6 +62,9 @@ a new action will not wipe your existing bindings.
 | `F` | Jetpack (on a surface) |
 | `Tab` | Cycle mode |
 | `H` | Hide HUD |
+| `G` | Interstellar mode |
+| `1`–`9` | Emotes |
+| `` ` `` | Hide emote bar |
 | `Esc` | Menu |
 
 ### Tunables
@@ -77,6 +80,30 @@ These drive the real values, not cosmetic copies. Set jump height to 4 m and
 the measured apex is 4.03 m; set run speed to 18 and you run at exactly 18 m/s.
 Jump height stays independent of gravity via `v = sqrt(2gh)`, so raising it
 behaves the same on the Moon as on Earth.
+
+### Characters and emotes
+
+Three selectable characters, remembered between sessions:
+
+| | Rig | Emotes |
+|---|---|---|
+| **Astra** | Mixamo human | 4 clips + 5 poses |
+| **Vega** | Mixamo human, heavier | 5 poses |
+| **Kepler** | Robot, own skeleton | 8 clips |
+
+Emotes fire on the number keys, or from the bar (`` ` `` hides it). Two kinds,
+because the free rigs do not ship the same clips:
+
+- **Clip emotes** play an animation that came with the model. RobotExpressive
+  has a real set — Dance, Wave, Sit, Stand, Yes, No, Thumbs up, Leap.
+- **Pose emotes** are authored here as bone rotations and blended on. They
+  exist because the poses this project actually wants — cross-legged
+  **Meditate**, **Lie down**, **Float** in lotus, **Bow**, **Reach** — are in
+  no free clip set. They need Mixamo bone names, so they are offered on the two
+  human rigs.
+
+Walking cancels an emote automatically; an emote you must cancel by hand before
+you can move feels broken.
 
 ### Modes
 

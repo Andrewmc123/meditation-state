@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CHARACTERS, POSES } from './CharacterLibrary.js';
 
 /**
  * The third-person body: a rigged humanoid that space-walks.
@@ -58,6 +59,8 @@ export class Character {
     this._pitch = 0;
     this._burn = 0;
     this._t = 0;
+    this.emote = null;
+    this.emoteWeight = 0;
     this.poseMode = 'space';   // 'space' | 'surface'
 
     this._buildLights();
@@ -97,20 +100,41 @@ export class Character {
     }
   }
 
-  async load(url = 'models/Xbot.glb') {
-    const gltf = await new GLTFLoader().loadAsync(url);
+  /**
+   * Load one of the library characters. Safe to call repeatedly - the previous
+   * model is disposed first, so switching characters mid-session does not leak
+   * geometry or leave two skeletons in the scene.
+   */
+  async load(charKey = 'xbot') {
+    const def = CHARACTERS[charKey] || CHARACTERS.xbot;
+
+    if (this.model) {
+      this.root.remove(this.model);
+      this.model.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) [].concat(o.material).forEach((m) => m.dispose?.());
+      });
+      this.mixer?.stopAllAction();
+    }
+
+    this.charKey = charKey;
+    this.def = def;
+    this.bones = {};
+    this.actions = {};
+    this.skinned = [];
+
+    const gltf = await new GLTFLoader().loadAsync(def.file);
     this.model = gltf.scene;
-    this.model.rotation.y = Math.PI; // face away from camera
+    this.model.rotation.y = Math.PI;   // face away from camera
+    this.model.scale.setScalar(def.scale || 1);
     this.root.add(this.model);
 
-    this.skinned = [];
     this.model.traverse((o) => {
-      if (o.isSkinnedMesh) {
+      if (o.isSkinnedMesh || o.isMesh) {
         o.frustumCulled = false;
-        this.skinned.push(o);
-        // Xbot ships with a flat unlit-ish look; give it a suit response.
+        if (o.isSkinnedMesh) this.skinned.push(o);
         const m = o.material;
-        if (m) {
+        if (m && m.isMeshStandardMaterial) {
           m.roughness = 0.55; m.metalness = 0.15; m.envMapIntensity = 0.6;
           // A little self-illumination so the suit never fully disappears on
           // the night side of a planet.
@@ -129,18 +153,81 @@ export class Character {
       a.play();
       this.actions[clip.name] = a;
     }
-    // Idle is the base layer; everything else is additive on top of it.
-    if (this.actions.idle) this.actions.idle.setEffectiveWeight(1);
 
-    // Rest pose, captured so the space-walk can blend against it.
+    const L = def.locomotion;
+    this.idleA = this.actions[L.idle] || null;
+    this.walkA = this.actions[L.walk] || null;
+    this.runA  = this.actions[L.run]  || null;
+    if (this.idleA) this.idleA.setEffectiveWeight(1);
+
+    // Bind pose, captured so both the space-walk and the authored poses have
+    // something to blend against.
     this._rest = {};
-    for (const n of LIMB) {
-      const b = this.bones[n];
-      if (b) this._rest[n] = b.quaternion.clone();
+    for (const name of Object.keys(this.bones)) {
+      this._rest[name] = this.bones[name].quaternion.clone();
     }
 
+    this.emote = null;
+    this.emoteWeight = 0;
     this.loaded = true;
     return this;
+  }
+
+  /** Emote names this character can perform. */
+  get emoteKeys() {
+    const out = Object.keys(this.def?.clipEmotes || {});
+    if (this.def?.skeleton === 'mixamo') out.push(...Object.keys(POSES));
+    return out;
+  }
+
+  /**
+   * Start an emote. Clip emotes play their animation; pose emotes blend the
+   * authored bone rotations in. Passing the active emote again cancels it.
+   */
+  playEmote(key) {
+    if (!this.loaded) return;
+    if (this.emote && this.emote.key === key) { this.stopEmote(); return; }
+    this.stopEmote();
+
+    const clipDef = this.def.clipEmotes?.[key];
+    if (clipDef) {
+      const a = this.actions[clipDef.clip];
+      if (!a) return;
+      a.reset();
+      a.setEffectiveWeight(1);
+      a.setLoop(clipDef.hold ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+      a.clampWhenFinished = true;
+      a.play();
+      this.emote = { key, kind: 'clip', action: a, hold: !!clipDef.hold };
+      return;
+    }
+
+    const pose = POSES[key];
+    if (pose && this.def.skeleton === 'mixamo') {
+      this.emote = { key, kind: 'pose', pose };
+    }
+  }
+
+  stopEmote() {
+    if (this.emote?.kind === 'clip') {
+      this.emote.action.setEffectiveWeight(0);
+      this.emote.action.stop();
+    }
+    this.emote = null;
+  }
+
+  /** Blend an authored pose in over whatever the clips produced. */
+  _applyPose(pose, w) {
+    const e = new THREE.Euler();
+    const q = new THREE.Quaternion();
+    for (const [name, rot] of Object.entries(pose.bones)) {
+      const b = this.bones[name];
+      const rest = this._rest[name];
+      if (!b || !rest) continue;
+      e.set(rot[0], rot[1], rot[2]);
+      q.setFromEuler(e).premultiply(rest);
+      b.quaternion.slerp(q, w);
+    }
   }
 
   setVisible(v) { this.visible = v; this.root.visible = v; }
@@ -170,8 +257,6 @@ export class Character {
   updateSurface(dt, { speed = 0, running = false, grounded = true, flying = false, breath = 0.5 }) {
     if (!this.loaded) return;
     this._t += dt;
-    const A = this.actions;
-
     const walkRef = 3.4, runRef = 8.4;
     let wIdle = 0, wWalk = 0, wRun = 0;
 
@@ -189,20 +274,24 @@ export class Character {
       }
     }
 
-    if (A.idle) A.idle.setEffectiveWeight(wIdle);
-    if (A.walk) {
-      A.walk.setEffectiveWeight(wWalk);
-      A.walk.timeScale = THREE.MathUtils.clamp(speed / 1.4, 0.35, 2.4);
+    // Resolved at load time, because the three rigs name these clips
+    // differently: idle/walk/run, Idle/Walk/Run, Idle/Walking/Running.
+    if (this.idleA) this.idleA.setEffectiveWeight(wIdle);
+    if (this.walkA) {
+      this.walkA.setEffectiveWeight(wWalk);
+      this.walkA.timeScale = THREE.MathUtils.clamp(speed / 1.4, 0.35, 2.4);
     }
-    if (A.run) {
-      A.run.setEffectiveWeight(wRun);
-      A.run.timeScale = THREE.MathUtils.clamp(speed / 3.4, 0.5, 2.2);
+    if (this.runA) {
+      this.runA.setEffectiveWeight(wRun);
+      this.runA.timeScale = THREE.MathUtils.clamp(speed / 3.4, 0.5, 2.2);
     }
     this.mixer.update(dt);
 
     // Airborne, tuck slightly and trail the arms; on the ground, leave the
     // clips alone so the walk reads cleanly.
     if (flying || !grounded) this._poseSpacewalk(flying ? 0.7 : 0.3, this._burn);
+
+    this._tickEmote(dt, speed > 0.35);
 
     for (let i = 0; i < this.thrusters.length; i++) {
       const s = this.thrusters[i];
@@ -245,18 +334,21 @@ export class Character {
     this.root.position.y = bob;
 
     // ---- animation weights ---------------------------------------------
-    const A = this.actions;
-    if (A.idle) A.idle.setEffectiveWeight(1 - glide * 0.75);
-    if (A.run) {
+    if (this.idleA) this.idleA.setEffectiveWeight(1 - glide * 0.75);
+    if (this.runA) {
       // Only meaningful once there is a surface underfoot; in space it just
       // adds a little limb motion to the glide.
-      A.run.setEffectiveWeight(glide * 0.18);
-      A.run.timeScale = 0.55 + glide * 0.5;
+      this.runA.setEffectiveWeight(glide * 0.18);
+      this.runA.timeScale = 0.55 + glide * 0.5;
     }
     this.mixer.update(dt);
 
     // ---- procedural space-walk on top of the clips ----------------------
-    this._poseSpacewalk(glide, this._burn);
+    // Skip it while an authored pose is showing, or the two fight over the
+    // same bones and the lotus turns into a shrug.
+    if (!this.emote || this.emoteWeight < 0.5) this._poseSpacewalk(glide, this._burn);
+
+    this._tickEmote(dt, speed01 > 0.04);
 
     // ---- thrusters -------------------------------------------------------
     const th = this._burn * 0.85 + glide * 0.25;
@@ -282,6 +374,40 @@ export class Character {
     );
     this.camera.lookAt(this.camLookAt);
     this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Ease the active emote in, and drop it when the player starts moving -
+   * an emote you have to cancel by hand before you can walk feels broken.
+   */
+  _tickEmote(dt, moving) {
+    if (this.emote && moving) this.stopEmote();
+
+    const want = this.emote ? 1 : 0;
+    this.emoteWeight += (want - this.emoteWeight) * (1 - Math.exp(-7 * dt));
+    if (this.emoteWeight < 0.002) {
+      if (this._poseRootApplied) {
+        this.root.rotation.set(this._bank ? 0 : 0, this.root.rotation.y, 0);
+        this._poseRootApplied = false;
+      }
+      return;
+    }
+
+    if (this.emote?.kind === 'pose') {
+      const p = this.emote.pose;
+      this._applyPose(p, this.emoteWeight);
+      // Root tilt is what turns a relaxed skeleton into someone lying down.
+      this.root.rotation.x = p.root.rot[0] * this.emoteWeight;
+      this.root.rotation.z = p.root.rot[2] * this.emoteWeight;
+      this.root.position.y += p.root.y * this.emoteWeight;
+      this._poseRootApplied = true;
+    }
+
+    // A one-shot clip that has finished releases itself.
+    if (this.emote?.kind === 'clip' && !this.emote.hold) {
+      const a = this.emote.action;
+      if (a.time >= a.getClip().duration - 0.02) this.stopEmote();
+    }
   }
 
   /** Rotate the limbs from the rest pose into a trailing space-walk. */
