@@ -3,9 +3,9 @@
  * All sources are free and permissively licensed - see LICENSES.md.
  * Run: node tools/fetch-assets.mjs
  */
-import { writeFile, mkdir, stat } from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
+// createWriteStream/pipeline are gone: downloads are buffered and validated
+// before anything is written, so a block page never lands on disk.
+import { writeFile, mkdir, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -110,15 +110,20 @@ const UA = {
   Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8',
 };
 
-/** First bytes of the formats we accept, so an HTML error page is caught. */
-function looksLikeImage(buf) {
-  if (buf.length < 4) return false;
-  const b = buf;
-  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true;              // JPEG
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true; // PNG
-  if ((b[0] === 0x49 && b[1] === 0x49) || (b[0] === 0x4d && b[1] === 0x4d)) return true; // TIFF
-  if (b[0] === 0x67 && b[1] === 0x6c && b[2] === 0x54 && b[3] === 0x46) return true;     // glTF
-  return false;
+/**
+ * Reject an HTML error page served with a 200, rather than trying to prove a
+ * payload IS a given format.
+ *
+ * The first version of this checked for JPEG/PNG/TIFF/glTF magic bytes and
+ * rejected everything else - which promptly rejected the HYG catalogue,
+ * because a CSV is not an image. What actually needs catching is the block
+ * page, and that is always HTML.
+ */
+function looksLikeErrorPage(buf) {
+  const head = buf.subarray(0, 512).toString('latin1').trimStart().toLowerCase();
+  return head.startsWith('<!doctype html')
+      || head.startsWith('<html')
+      || head.startsWith('<?xml') && head.includes('<html');
 }
 
 function human(n) {
@@ -151,9 +156,9 @@ async function download(url, dest, label) {
     if (buf.length < 1024) {
       throw new Error(`only ${buf.length} bytes - likely a block or error page`);
     }
-    if (!looksLikeImage(buf)) {
-      const sniff = buf.subarray(0, 64).toString('utf8').replace(/\s+/g, ' ').trim();
-      throw new Error(`not an image - server sent: ${sniff.slice(0, 60)}`);
+    if (looksLikeErrorPage(buf)) {
+      const sniff = buf.subarray(0, 120).toString('utf8').replace(/\s+/g, ' ').trim();
+      throw new Error(`server sent an HTML page, not the file: ${sniff.slice(0, 70)}`);
     }
 
     await writeFile(dest, buf);
@@ -171,30 +176,30 @@ async function main() {
   await mkdir(RAW, { recursive: true });
 
   console.log('\n[1/4] Planetary textures - Solar System Scope, CC BY 4.0');
+  /**
+   * A map counts as present if ANY usable resolution of it is on disk.
+   *
+   * Handling this case by case did not work. build-catalog converts the TIFF
+   * sources to JPEG and deletes the originals, and a deploy prunes each 8K
+   * source once its 4K level exists - so after one build the requested
+   * filename is routinely not the filename present, at a different extension
+   * AND a different resolution. Matching on the base name covers every
+   * combination at once, and is what actually makes the build hermetic.
+   *
+   * Pass --refresh to ignore what is on disk and re-download everything.
+   */
+  const REFRESH = process.argv.includes('--refresh');
+  const baseOf = (f) => f.replace(/^\d+k_/, '').replace(/\.(jpe?g|png|tiff?)$/i, '');
+  const onDisk = new Set((await readdir(TEX).catch(() => [])).map(baseOf));
+
   let ok = 0, already = 0;
   // Serial: the host throttles parallel bursts and starts serving HTML error pages.
   for (const f of TEXTURES) {
-    // Two maps ship only as TIFF and are converted to JPEG by build-catalog,
-    // which then deletes the source. Without this they would be re-downloaded
-    // on every build - and 403 on any host the CDN dislikes.
-    const converted = /\.tiff?$/i.test(f)
-      && await exists(path.join(TEX, f.replace(/\.tiff?$/i, '.jpg')));
-    if (converted) {
-      console.log(`  skip  ${f}  (already converted to JPEG)`);
-      ok++; already++;
-      continue;
-    }
-
-    // A deploy build prunes each 8K source once its 4K level exists. Without
-    // this check the fetcher would re-download those 8K maps on every single
-    // build - pointlessly, since the 4K is what ships, and fatally on a host
-    // the CDN blocks.
-    if (f.startsWith('8k_') && await exists(path.join(TEX, f.replace(/^8k_/, '4k_')))) {
-      console.log(`  skip  ${f}  (4K level already derived)`);
-      ok++; already++;
-      continue;
-    }
+    if (!REFRESH && onDisk.has(baseOf(f))) { ok++; already++; continue; }
     if (await download(SSS + f, path.join(TEX, f), f)) ok++;
+  }
+  if (already) {
+    console.log(`  ${already} already present at some resolution (--refresh to re-download)`);
   }
   console.log(`      ${ok}/${TEXTURES.length} textures`);
   if (ok === 0) {
