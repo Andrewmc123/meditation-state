@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Downloaded and generated assets.
+# All of these are reproducible from a clean clone with:
+#   npm run assets    (downloads ~90 MB from NASA/SSS/astronexus/three.js)
+#   npm run catalog   (builds stars.bin and the 2K/4K texture pyramid)
+# Keeping ~107 MB of binaries out of git keeps the history usable.
+public/tex/
+public/data/
+public/models/
+tools/raw/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
