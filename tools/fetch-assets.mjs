@@ -184,6 +184,16 @@ async function main() {
       ok++; already++;
       continue;
     }
+
+    // A deploy build prunes each 8K source once its 4K level exists. Without
+    // this check the fetcher would re-download those 8K maps on every single
+    // build - pointlessly, since the 4K is what ships, and fatally on a host
+    // the CDN blocks.
+    if (f.startsWith('8k_') && await exists(path.join(TEX, f.replace(/^8k_/, '4k_')))) {
+      console.log(`  skip  ${f}  (4K level already derived)`);
+      ok++; already++;
+      continue;
+    }
     if (await download(SSS + f, path.join(TEX, f), f)) ok++;
   }
   console.log(`      ${ok}/${TEXTURES.length} textures`);
