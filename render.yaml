@@ -4,11 +4,12 @@
 # bundle, and everything else is data. There is no server, no API and no
 # database, so this is a single static service.
 #
-# The build is unusual in one respect: roughly 60 MB of textures and
-# catalogues are downloaded from NASA, Solar System Scope, astronexus and the
-# three.js repository at build time rather than committed. Keeping ~107 MB of
-# binaries out of git keeps the history usable, and every source is a stable
-# public URL. A cold build takes about 90 seconds, most of it download.
+# The build is unusual in one respect: roughly 110 MB of textures, catalogues
+# and character models are downloaded from Solar System Scope, the NASA
+# Exoplanet Archive, astronexus and the three.js repository at build time
+# rather than committed. Keeping that out of git keeps the history usable, and
+# every source is a stable public URL. A cold build measures about 60 seconds,
+# most of it download, and publishes ~38 MB.
 #
 # Deploy: push this file to the repo, then in Render choose
 # New > Blueprint and point it at the repository.
@@ -17,15 +18,18 @@ services:
   - type: web
     name: meditation-state
     runtime: static
-    plan: free
+
+    # No `plan` key. Static sites on Render have no compute plan - there is no
+    # instance behind them - and the validator rejects one outright with
+    # "no such plan free for service type web".
 
     # build:deploy = assets && build-catalog --prune-8k && vite build
     #   assets      downloads ~97 MB of 8K maps, the star catalogue and the
     #               character models
     #   --prune-8k  packs 119,626 stars into stars.bin, derives the 4K level
-    #               from each 8K map, then deletes the 8K sources
-    # The published site therefore tops out at 4K and weighs ~31 MB rather
-    # than ~75 MB. Every planet is a jump target, so no map is left at 2K.
+    #               from each 8K map, then deletes the 8K sources it derived
+    # Measured from a clean clone: ~60 s, publishing ~38 MB. Every planet is a
+    # jump target, so no map is downgraded to 2K to save space.
     buildCommand: npm ci && npm run build:deploy
     staticPublishPath: ./dist
 
