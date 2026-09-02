@@ -103,6 +103,9 @@ const MODELS = ['Xbot.glb', 'Soldier.glb', 'RobotExpressive/RobotExpressive.glb'
  * This only matters for refreshing assets locally. The committed 2K/4K set
  * means a deploy never touches that host at all - see the note in .gitignore.
  */
+/** --refresh ignores everything already on disk and re-downloads. */
+const REFRESH = process.argv.includes('--refresh');
+
 const UA = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -188,7 +191,6 @@ async function main() {
    *
    * Pass --refresh to ignore what is on disk and re-download everything.
    */
-  const REFRESH = process.argv.includes('--refresh');
   const baseOf = (f) => f.replace(/^\d+k_/, '').replace(/\.(jpe?g|png|tiff?)$/i, '');
   const onDisk = new Set((await readdir(TEX).catch(() => [])).map(baseOf));
 
@@ -216,7 +218,13 @@ async function main() {
   }
 
   console.log('\n[3/4] HYG star catalogue v4.1 - astronexus, CC BY-SA 2.5');
-  await download(HYG, path.join(RAW, 'hyg.csv'), 'hygdata_v41.csv');
+  // 34 MB of CSV whose only purpose is producing the 3.3 MB stars.bin. If that
+  // output is already here - it is committed - the download is pure waste.
+  if (!REFRESH && await exists(path.join(DATA, 'stars.bin'))) {
+    console.log('  skip  hygdata_v41.csv  (stars.bin already built from it)');
+  } else {
+    await download(HYG, path.join(RAW, 'hyg.csv'), 'hygdata_v41.csv');
+  }
 
   console.log('\n[4/4] Confirmed exoplanets - NASA Exoplanet Archive, public domain');
   const exoPath = path.join(DATA, 'exoplanets.json');
