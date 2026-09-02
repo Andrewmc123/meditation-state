@@ -41,8 +41,30 @@ function bvToRGB(bv) {
 }
 
 async function buildStars() {
+  // stars.bin is committed. Deriving it needs the 34 MB HYG CSV, which is a
+  // pointless download on every deploy when the 3.3 MB output only changes
+  // when the catalogue does. Delete stars.bin to force a rebuild.
+  const outFile = path.join(DATA, 'stars.bin');
+  const rawFile = path.join(RAW, 'hyg.csv');
+
+  try {
+    const s = await stat(outFile);
+    if (s.size > 1_000_000) {
+      console.log(`\n[stars] stars.bin present (${(s.size / 1e6).toFixed(1)} MB) - skipping rebuild.`);
+      return;
+    }
+  } catch { /* fall through and build it */ }
+
+  try {
+    await stat(rawFile);
+  } catch {
+    console.error('\n[stars] neither public/data/stars.bin nor tools/raw/hyg.csv exists.');
+    console.error('        Run `npm run assets` to fetch the catalogue first.\n');
+    process.exit(1);
+  }
+
   console.log('\n[stars] reading HYG catalogue...');
-  const csv = await readFile(path.join(RAW, 'hyg.csv'), 'utf8');
+  const csv = await readFile(rawFile, 'utf8');
   const lines = csv.split('\n');
 
   // HYG quotes its header names and quotes string values inconsistently.

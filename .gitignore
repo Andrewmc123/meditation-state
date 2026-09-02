@@ -16,7 +16,13 @@ dist/
 # far cheaper than making every deploy depend on a host that can refuse it.
 # `npm run assets` still refreshes them locally.
 
-public/models/
+# Character models are committed too (5 MB, MIT, from the three.js examples).
+# Between these, public/tex and public/data the build is fully hermetic: it
+# needs no network at all, so no upstream outage or bot filter can break a
+# deploy. `npm run assets` still refreshes everything.
+
+# The 34 MB HYG source CSV is NOT committed - stars.bin is derived from it and
+# is only 3.3 MB, so the input is a local-only build artefact.
 tools/raw/
 
 # public/data is generated too, with one exception: the exoplanet archive is
