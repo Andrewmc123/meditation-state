@@ -13,6 +13,17 @@ const TEX = path.join(ROOT, 'public', 'tex');
 const DATA = path.join(ROOT, 'public', 'data');
 const RAW  = path.join(ROOT, 'tools', 'raw');
 
+/**
+ * Upstream publishes 2K and 8K only - there is no 4K to download - so the 4K
+ * level used at runtime is always derived locally by tools/build-catalog.mjs.
+ *
+ * There is deliberately no reduced download profile. Every planet is a jump
+ * target, so there is no body you cannot fly right up to and no map that can
+ * safely be left at 2K. Deploy builds fetch the same 8K sources, derive 4K,
+ * then discard the 8K with `build-catalog --prune-8k` - which is where the
+ * published size saving actually comes from.
+ */
+
 // --- Solar System Scope, CC BY 4.0 -----------------------------------------
 const SSS = 'https://www.solarsystemscope.com/textures/download/';
 const TEXTURES = [
@@ -23,8 +34,10 @@ const TEXTURES = [
   '8k_earth_daymap.jpg',
   '8k_earth_nightmap.jpg',
   '8k_earth_clouds.jpg',
-  '8k_earth_normal_map.jpg',
-  '8k_earth_specular_map.jpg',
+  // Upstream publishes these two only as TIFF, and only the normal map at 2K.
+  // build-catalog converts them to JPEG, which is what the loader wants.
+  '2k_earth_normal_map.tif',
+  '8k_earth_specular_map.tif',
   '8k_moon.jpg',
   '8k_mars.jpg',
   '8k_jupiter.jpg',

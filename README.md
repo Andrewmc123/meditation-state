@@ -12,6 +12,18 @@ npm run dev
 
 Then open http://localhost:5173.
 
+### Deploying
+
+`render.yaml` is a [Render Blueprint](https://render.com/docs/blueprint-spec).
+In Render choose **New > Blueprint** and point it at this repository; it needs
+no configuration beyond that.
+
+The build runs `npm run build:deploy`, which downloads the assets, derives the
+4K level from each 8K source, deletes the 8K originals, then builds. A cold
+build takes about **60 seconds** and publishes **~38 MB**. Assets are not
+committed - keeping ~107 MB of binaries out of git keeps the history usable,
+and every source is a stable public URL.
+
 ---
 
 ## What is actually real in here

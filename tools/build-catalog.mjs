@@ -10,7 +10,6 @@
  */
 import { readFile, writeFile, readdir, mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const DATA = path.join(ROOT, 'public', 'data');
@@ -121,10 +120,18 @@ const LEVELS = [
 ];
 
 async function buildTextures() {
-  console.log('\n[tex] building resolution pyramid...');
   const files = (await readdir(TEX)).filter(
     (f) => f.startsWith('8k_') && /\.(jpg|png)$/i.test(f),
   );
+  if (!files.length) {
+    console.log('\n[tex] no 8K maps present - nothing to downsample.');
+    return;
+  }
+  console.log(`\n[tex] building resolution pyramid from ${files.length} maps...`);
+
+  // Imported here rather than at module scope: a deploy that ships 2K never
+  // resizes anything, and should not fail if sharp's native binary is missing.
+  const { default: sharp } = await import('sharp');
 
   for (const f of files) {
     const src = path.join(TEX, f);
@@ -149,10 +156,63 @@ async function buildTextures() {
   }
 }
 
+/**
+ * Browsers cannot decode TIFF, and upstream ships Earth's normal and specular
+ * maps only in that format. Convert whatever arrived, then drop the source.
+ */
+async function convertTiffs() {
+  const tifs = (await readdir(TEX)).filter((f) => /\.tiff?$/i.test(f));
+  if (!tifs.length) return;
+  const { default: sharp } = await import('sharp');
+  const { unlink } = await import('node:fs/promises');
+  console.log('\n[tex] converting TIFF sources...');
+  for (const f of tifs) {
+    const out = f.replace(/\.tiff?$/i, '.jpg');
+    await sharp(path.join(TEX, f)).jpeg({ quality: 90, mozjpeg: true })
+      .toFile(path.join(TEX, out));
+    await unlink(path.join(TEX, f));
+    console.log(`  ${f} -> ${out}`);
+  }
+}
+
+/**
+ * Drop the 8K sources once the 4K level exists. Deploy builds use this: the
+ * renderer's LOD walks down a level when a file is missing, so the site tops
+ * out at 4K instead of shipping 45 MB that nobody downloads.
+ */
+async function prune8k() {
+  const { unlink } = await import('node:fs/promises');
+  const all = await readdir(TEX);
+  const files = all.filter((f) => f.startsWith('8k_'));
+  let freed = 0, pruned = 0, kept = [];
+
+  for (const f of files) {
+    // Only prune a source that actually produced a 4K level. Several of the
+    // upstream "8k_" maps are narrower than 4096 - Jupiter, Saturn and the Sun
+    // among them - so the pyramid skips them, and deleting those would leave
+    // the body at 2K. They are small precisely because they are low
+    // resolution, so keeping them costs almost nothing.
+    const derived = all.includes(f.replace(/^8k_/, '4k_'));
+    if (!derived) { kept.push(f.replace(/^8k_/, '')); continue; }
+    freed += (await stat(path.join(TEX, f))).size;
+    await unlink(path.join(TEX, f));
+    pruned++;
+  }
+
+  if (pruned) {
+    console.log(`\n[tex] pruned ${pruned} 8K maps (${(freed / 1e6).toFixed(0)} MB freed)`);
+  }
+  if (kept.length) {
+    console.log(`[tex] kept ${kept.length} without a 4K level: ${kept.join(', ')}`);
+  }
+}
+
 async function main() {
   await mkdir(DATA, { recursive: true });
   await buildStars();
+  await convertTiffs();
   await buildTextures();
+  if (process.argv.includes('--prune-8k')) await prune8k();
   console.log('\nDone.\n');
 }
 

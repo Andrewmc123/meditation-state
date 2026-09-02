@@ -19,6 +19,7 @@
     "build": "vite build",
     "preview": "vite preview --port 4173",
     "assets": "node tools/fetch-assets.mjs",
-    "catalog": "node tools/build-catalog.mjs"
+    "catalog": "node tools/build-catalog.mjs",
+    "build:deploy": "npm run assets && node tools/build-catalog.mjs --prune-8k && vite build"
   }
 }
