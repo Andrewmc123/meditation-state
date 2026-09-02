@@ -10,9 +10,16 @@ dist/
 #   npm run catalog   (builds stars.bin and the 2K/4K texture pyramid)
 # Keeping ~107 MB of binaries out of git keeps the history usable.
 public/tex/
-public/data/
 public/models/
 tools/raw/
+
+# public/data is generated too, with one exception: the exoplanet archive is
+# the slowest and least reliable dependency in the build (65 s at best, and it
+# does drop connections). At 1 MB it is far cheaper to commit than to make
+# every deploy wait on it. Delete the file and re-run `npm run assets` to
+# refresh it.
+public/data/*
+!public/data/exoplanets.json
 
 # Editor / OS
 .DS_Store

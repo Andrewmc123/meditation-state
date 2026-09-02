@@ -207,12 +207,57 @@ async function prune8k() {
   }
 }
 
+/**
+ * Refuse to finish a build that would publish a broken site.
+ *
+ * The asset fetcher deliberately tolerates a failed download - one missing
+ * texture just means the LOD serves a lower level. But a missing catalogue is
+ * not survivable: without exoplanets.json interstellar mode loads zero systems
+ * and the feature is silently gone. A green deploy that ships that is worse
+ * than a red one. This check turns a real 218-second archive timeout from an
+ * invisible regression into a failed build.
+ */
+async function verify() {
+  const required = [
+    ['data/stars.bin', 1_000_000, 'the star catalogue'],
+    ['data/exoplanets.json', 200_000, 'the exoplanet archive'],
+    ['models/Xbot.glb', 500_000, 'the default character'],
+  ];
+
+  const missing = [];
+  for (const [rel, minBytes, what] of required) {
+    try {
+      const s = await stat(path.join(ROOT, 'public', rel));
+      if (s.size < minBytes) missing.push(`${rel} is only ${s.size} bytes - ${what}`);
+    } catch {
+      missing.push(`${rel} is missing - ${what}`);
+    }
+  }
+
+  // At least one map, at any resolution, per body you can land on.
+  const tex = await readdir(TEX).catch(() => []);
+  for (const body of ['earth_daymap', 'mars', 'moon']) {
+    if (!tex.some((f) => f.endsWith(`_${body}.jpg`))) {
+      missing.push(`no texture at any resolution for ${body}`);
+    }
+  }
+
+  if (missing.length) {
+    console.error('\n[verify] FAILED - refusing to publish an incomplete build:');
+    for (const m of missing) console.error('  - ' + m);
+    console.error('');
+    process.exit(1);
+  }
+  console.log('\n[verify] required assets present.');
+}
+
 async function main() {
   await mkdir(DATA, { recursive: true });
   await buildStars();
   await convertTiffs();
   await buildTextures();
   if (process.argv.includes('--prune-8k')) await prune8k();
+  await verify();
   console.log('\nDone.\n');
 }
 

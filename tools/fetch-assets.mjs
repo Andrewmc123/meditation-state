@@ -57,10 +57,37 @@ const HYG =
   'https://raw.githubusercontent.com/astronexus/HYG-Database/main/hyg/CURRENT/hygdata_v41.csv';
 
 const EXO_TAP = 'https://exoplanetarchive.ipac.caltech.edu/TAP/sync';
+
+/**
+ * Asked for as CSV, not JSON, and without an ORDER BY.
+ *
+ * Measured against the live archive: the same rows take 220 s as JSON and 65 s
+ * as CSV, and the payload halves from 1.25 MB to 0.57 MB. The cost is in their
+ * JSON serialiser, not the query. Sorting is done here instead, which is free.
+ */
 const EXO_QUERY = `select pl_name,hostname,sy_dist,pl_rade,pl_bmasse,pl_orbper,pl_orbsmax,pl_eqt,st_teff,st_rad,st_mass,ra,dec,discoverymethod,disc_year
 from pscomppars
-where sy_dist is not null and sy_dist < 500
-order by sy_dist asc`;
+where sy_dist is not null and sy_dist < 500`;
+
+/** Minimal RFC4180 reader: the archive quotes any field containing a comma. */
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else quoted = false;
+      } else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); field = ''; rows.push(row); row = []; }
+    else if (c !== '\r') field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
 
 // --- Rigged characters, MIT, from the three.js examples --------------------
 const MODELS_BASE = 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/';
@@ -125,15 +152,50 @@ async function main() {
   await download(HYG, path.join(RAW, 'hyg.csv'), 'hygdata_v41.csv');
 
   console.log('\n[4/4] Confirmed exoplanets - NASA Exoplanet Archive, public domain');
-  try {
-    const url = `${EXO_TAP}?query=${encodeURIComponent(EXO_QUERY)}&format=json`;
-    const res = await fetch(url, { headers: UA });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const rows = await res.json();
-    await writeFile(path.join(DATA, 'exoplanets.json'), JSON.stringify(rows));
-    console.log(`  ok    exoplanets.json  ${rows.length} systems within 500 pc`);
-  } catch (e) {
-    console.log(`  FAIL  exoplanets  ${e.message}`);
+  const exoPath = path.join(DATA, 'exoplanets.json');
+
+  // This file is committed, precisely because the archive is the slowest and
+  // least reliable dependency here. A deploy should never wait a minute on it,
+  // and must never quietly ship without it. Delete the file to force a refresh.
+  if (await exists(exoPath)) {
+    const s = await stat(exoPath);
+    console.log(`  skip  exoplanets.json  (${human(s.size)} already present)`);
+  } else {
+    const url = `${EXO_TAP}?query=${encodeURIComponent(EXO_QUERY)}&format=csv`;
+    let rows = null;
+
+    // The archive routinely takes a minute and occasionally drops the
+    // connection outright, so give it real time and two more chances.
+    for (let attempt = 1; attempt <= 3 && !rows; attempt++) {
+      try {
+        const res = await fetch(url, {
+          headers: UA,
+          signal: AbortSignal.timeout(240000),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const table = parseCSV(await res.text());
+        const head = table.shift().map((h) => h.trim());
+        rows = table
+          .filter((r) => r.length === head.length)
+          .map((r) => Object.fromEntries(head.map((h, i) => {
+            const v = r[i];
+            if (v === '' || v === undefined) return [h, null];
+            const n = Number(v);
+            return [h, Number.isNaN(n) ? v : n];
+          })));
+        rows.sort((a, b) => (a.sy_dist ?? 1e9) - (b.sy_dist ?? 1e9));
+      } catch (e) {
+        console.log(`  retry ${attempt}/3  ${e.message}`);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 5000));
+      }
+    }
+
+    if (rows?.length) {
+      await writeFile(exoPath, JSON.stringify(rows));
+      console.log(`  ok    exoplanets.json  ${rows.length} planets within 500 pc`);
+    } else {
+      console.log('  FAIL  exoplanets  could not reach the archive');
+    }
   }
 
   console.log('\nDone.\n');
