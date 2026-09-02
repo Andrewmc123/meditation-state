@@ -166,11 +166,28 @@ async function convertTiffs() {
   const { default: sharp } = await import('sharp');
   const { unlink } = await import('node:fs/promises');
   console.log('\n[tex] converting TIFF sources...');
+
   for (const f of tifs) {
+    const src = path.join(TEX, f);
+
+    // A failed download can leave an HTML error page sitting at a .tif path.
+    // Handing that to sharp threw "Input file contains unsupported image
+    // format" and took the whole build down, which is the wrong response to
+    // one bad file: drop it and let the verify step decide if it mattered.
+    const { readFile: rf } = await import('node:fs/promises');
+    const head = (await rf(src)).subarray(0, 4);
+    const isTiff = (head[0] === 0x49 && head[1] === 0x49)   // little-endian
+                || (head[0] === 0x4d && head[1] === 0x4d);  // big-endian
+    if (!isTiff) {
+      console.log(`  skip ${f} - not a TIFF (${head.length ? [...head].map((b) => b.toString(16)).join(' ') : 'empty'})`);
+      await unlink(src);
+      continue;
+    }
+
     const out = f.replace(/\.tiff?$/i, '.jpg');
-    await sharp(path.join(TEX, f)).jpeg({ quality: 90, mozjpeg: true })
+    await sharp(src).jpeg({ quality: 90, mozjpeg: true })
       .toFile(path.join(TEX, out));
-    await unlink(path.join(TEX, f));
+    await unlink(src);
     console.log(`  ${f} -> ${out}`);
   }
 }

@@ -9,7 +9,13 @@ dist/
 #   npm run assets    (downloads ~90 MB from NASA/SSS/astronexus/three.js)
 #   npm run catalog   (builds stars.bin and the 2K/4K texture pyramid)
 # Keeping ~107 MB of binaries out of git keeps the history usable.
-public/tex/
+# Textures ARE committed. Solar System Scope's CDN filters by User-Agent and
+# refuses datacenter IPs outright - a Render build got 403 HTML pages for all
+# 21 files, wrote them to disk, and then crashed the TIFF converter. The set is
+# 28 MB of CC BY 4.0 images that change roughly never, so committing them is
+# far cheaper than making every deploy depend on a host that can refuse it.
+# `npm run assets` still refreshes them locally.
+
 public/models/
 tools/raw/
 

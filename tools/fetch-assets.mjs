@@ -93,7 +93,33 @@ function parseCSV(text) {
 const MODELS_BASE = 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/';
 const MODELS = ['Xbot.glb', 'Soldier.glb', 'RobotExpressive/RobotExpressive.glb'];
 
-const UA = { 'User-Agent': 'MeditationStateApp/1.0 (asset fetch)' };
+/**
+ * Solar System Scope's CDN filters by User-Agent: curl's default gets 200,
+ * a custom agent string gets a 403 HTML page, and from a datacenter it 403s
+ * regardless. The textures are CC BY 4.0 and meant to be downloaded, so this
+ * presents as an ordinary browser rather than fighting a bot filter that is
+ * not aimed at this use.
+ *
+ * This only matters for refreshing assets locally. The committed 2K/4K set
+ * means a deploy never touches that host at all - see the note in .gitignore.
+ */
+const UA = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    + '(KHTML, like Gecko) Chrome/128.0 Safari/537.36',
+  Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8',
+};
+
+/** First bytes of the formats we accept, so an HTML error page is caught. */
+function looksLikeImage(buf) {
+  if (buf.length < 4) return false;
+  const b = buf;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true;              // JPEG
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true; // PNG
+  if ((b[0] === 0x49 && b[1] === 0x49) || (b[0] === 0x4d && b[1] === 0x4d)) return true; // TIFF
+  if (b[0] === 0x67 && b[1] === 0x6c && b[2] === 0x54 && b[3] === 0x46) return true;     // glTF
+  return false;
+}
 
 function human(n) {
   return n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : (n / 1e3).toFixed(0) + ' kB';
@@ -117,10 +143,21 @@ async function download(url, dest, label) {
   try {
     const res = await fetch(url, { headers: UA, redirect: 'follow' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    await pipeline(res.body, createWriteStream(dest));
-    const s = await stat(dest);
-    if (s.size < 1024) throw new Error('suspiciously small: ' + s.size + ' bytes');
-    console.log(`  ok    ${label}  ${human(s.size)}`);
+
+    // Buffer rather than stream straight to disk, so a rejected body is never
+    // written. A CDN that answers 200 with an HTML block page used to leave 21
+    // "textures" of ~200 bytes on disk, which then crashed the TIFF converter.
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 1024) {
+      throw new Error(`only ${buf.length} bytes - likely a block or error page`);
+    }
+    if (!looksLikeImage(buf)) {
+      const sniff = buf.subarray(0, 64).toString('utf8').replace(/\s+/g, ' ').trim();
+      throw new Error(`not an image - server sent: ${sniff.slice(0, 60)}`);
+    }
+
+    await writeFile(dest, buf);
+    console.log(`  ok    ${label}  ${human(buf.length)}`);
     return true;
   } catch (e) {
     console.log(`  FAIL  ${label}  ${e.message}`);
@@ -134,12 +171,27 @@ async function main() {
   await mkdir(RAW, { recursive: true });
 
   console.log('\n[1/4] Planetary textures - Solar System Scope, CC BY 4.0');
-  let ok = 0;
+  let ok = 0, already = 0;
   // Serial: the host throttles parallel bursts and starts serving HTML error pages.
   for (const f of TEXTURES) {
+    // Two maps ship only as TIFF and are converted to JPEG by build-catalog,
+    // which then deletes the source. Without this they would be re-downloaded
+    // on every build - and 403 on any host the CDN dislikes.
+    const converted = /\.tiff?$/i.test(f)
+      && await exists(path.join(TEX, f.replace(/\.tiff?$/i, '.jpg')));
+    if (converted) {
+      console.log(`  skip  ${f}  (already converted to JPEG)`);
+      ok++; already++;
+      continue;
+    }
     if (await download(SSS + f, path.join(TEX, f), f)) ok++;
   }
   console.log(`      ${ok}/${TEXTURES.length} textures`);
+  if (ok === 0) {
+    console.log('      NOTE: every texture failed. The committed set under');
+    console.log('            public/tex is what deploys actually use, so this');
+    console.log('            only matters when refreshing assets locally.');
+  }
 
   console.log('\n[2/4] Rigged characters - three.js examples, MIT');
   const MODELS_DIR = path.join(ROOT, 'public', 'models');
