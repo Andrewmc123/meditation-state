@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Dimensions</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--void:#04010c;--ink:#efe9ff;--dim:#9a8fc4;--glass:rgba(10,4,30,.55);--line:rgba(190,170,255,.18)}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;background:var(--void);color:var(--ink);font-family:Syne,system-ui,sans-serif;overflow:hidden;touch-action:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+  button,label.btn{font:inherit;color:var(--ink);background:var(--glass);border:1px solid var(--line);border-radius:999px;padding:.8em 1.4em;cursor:pointer;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);font-weight:700;font-size:.95rem;display:inline-block;text-align:center}
+  [hidden]{display:none!important}
+  button:focus-visible,label.btn:focus-within{outline:2px solid #c9b8ff;outline-offset:3px}
+  #start{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:flex-end;padding:8vh 7vw calc(9vh + env(safe-area-inset-bottom));gap:1.6rem;background:radial-gradient(circle at 50% 40%,transparent 0,rgba(4,1,12,.6) 70%)}
+  #start h1{font-weight:800;font-size:clamp(3rem,15vw,7.5rem);line-height:.85;letter-spacing:-.04em}
+  #start p{color:var(--dim);max-width:30ch;font-size:1.05rem;line-height:1.45}
+  #start .row{display:flex;flex-direction:column;gap:.7rem;max-width:22rem}
+  #start .row button,#start .row label{width:100%}
+  #start .primary{background:#efe9ff;color:#140a33;border-color:#efe9ff}
+  input[type=file]{position:absolute;width:1px;height:1px;opacity:0}
+  #hud{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .6s}
+  #hud.on{opacity:1}
+  #hud.on .bar,#hud.on .bar *{pointer-events:auto}
+  #dimname{position:fixed;top:calc(1.4rem + env(safe-area-inset-top));left:1.4rem;font-weight:800;font-size:1.5rem;letter-spacing:-.02em;text-shadow:0 0 18px rgba(0,0,0,.8)}
+  #dimname small{display:block;font-weight:500;font-size:.8rem;color:var(--dim);margin-top:.2rem}
+  .bar{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-bottom));display:flex;gap:.6rem;align-items:center;background:var(--glass);border:1px solid var(--line);border-radius:22px;padding:.6rem;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+  #track{flex:1;min-width:0;padding:0 .6rem;font-weight:700;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #track small{display:block;color:var(--dim);font-weight:500;font-size:.75rem}
+  .bar button{padding:.65em 1.1em;font-size:.85rem}
+  #chakras{position:fixed;right:1rem;top:50%;transform:translateY(-50%);display:flex;flex-direction:column-reverse;gap:.55rem;align-items:flex-end}
+  .ch{display:flex;align-items:center;gap:.55rem;font-size:.72rem;font-weight:700;color:var(--dim);transition:color .3s}
+  .ch.top{color:var(--ink)}
+  .ch i{width:10px;height:10px;border-radius:50%;background:var(--c);box-shadow:0 0 0 var(--c);transition:transform .08s}
+  #chnote{font-size:.62rem;color:var(--dim);font-weight:500;margin-top:.4rem;text-align:right;max-width:9rem}
+  #flashmsg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:clamp(2rem,9vw,4.5rem);letter-spacing:-.03em;color:#fff;opacity:0;pointer-events:none;transition:opacity .9s;text-shadow:0 0 40px rgba(255,255,255,.6)}
+  #err{color:#ffb3c7;font-size:.9rem;min-height:1.2em}
+  @media (max-width:420px){.ch span{display:none}#chnote{display:none}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<section id="start">
+  <h1>Dimen&shy;sions</h1>
+  <p>Fly through geometric worlds shaped by your music. Big drops warp you into the next dimension.</p>
+  <div class="row">
+    <label class="btn primary">Choose songs<input id="files" type="file" accept="audio/*" multiple></label>
+    <button id="mic">Use microphone</button>
+    <button id="silent">Drift in silence</button>
+  </div>
+  <div id="err" role="alert"></div>
+</section>
+
+<div id="hud">
+  <div id="dimname"><span id="dn"></span><small id="mood"></small></div>
+  <div id="chakras"></div>
+  <div class="bar">
+    <div id="track"></div>
+    <button id="next" hidden>Next song</button>
+    <button id="warp">Warp</button>
+  </div>
+</div>
+<div id="flashmsg"></div>
+
+<audio id="player" playsinline crossorigin="anonymous"></audio>
+
+<script>
+// ---------- Dimensions: symmetry + palette (a,b,d of a cosine palette) ----------
+const DIMS = [
+  {name:"Indigo Hex",       n:6,  a:[.45,.12,.80], b:[.40,.12,.20], d:[0,0,.5],   k:.05},
+  {name:"Ember Tetra",      n:3,  a:[.80,.35,.15], b:[.20,.25,.15], d:[0,.1,.2],  k:.00},
+  {name:"Jade Cube",        n:4,  a:[.10,.60,.50], b:[.10,.30,.30], d:[.5,0,.3],  k:.10},
+  {name:"Ultraviolet Octa", n:8,  a:[.30,.50,.90], b:[.30,.40,.10], d:[.5,0,0],   k:.08},
+  {name:"Solar Dodeca",     n:12, a:[.60,.40,.60], b:[.40,.30,.30], d:[0,.15,.5], k:.12},
+];
+const CHAKRAS = [ // symbolic frequency mapping (artistic, not measured)
+  {name:"Root",lo:20,hi:120,c:"#ff3b3b"},{name:"Sacral",lo:120,hi:250,c:"#ff8a2b"},
+  {name:"Solar plexus",lo:250,hi:500,c:"#ffd43b"},{name:"Heart",lo:500,hi:1000,c:"#3bdc7a"},
+  {name:"Throat",lo:1000,hi:2500,c:"#3bb6ff"},{name:"Third eye",lo:2500,hi:6000,c:"#5b5bff"},
+  {name:"Crown",lo:6000,hi:16000,c:"#c65bff"},
+];
+
+// ---------- WebGL ----------
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl',{antialias:false,powerPreference:'high-performance'});
+const VS = `attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}`;
+const FS = `precision highp float;
+uniform vec2 R,look;uniform float T,trav,bass,mid,high,N,flash,fk;
+uniform vec3 pa,pb,pd;
+float h21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+vec3 pal(float t){return pa+pb*cos(6.28318*(t+pd));}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*R)/min(R.x,R.y);
+  uv-=look*.28;
+  float r=length(uv);
+  float a=atan(uv.y,uv.x)+T*.035;
+  a+= (.4/(r+.015))*(.04+mid*.05);               // twist deeper = more spiral
+  float s=6.28318/N;
+  float fa=abs(mod(a,s)-s*.5);                   // fold into one mirrored sector
+  float rp=r*cos(fa);                            // polygon-shaped tunnel walls
+  float z=.4/(rp+.015)+trav;
+  float ang=fa/s;
+  // kaleidoscopic fractal on the walls (seamless: mirrored in both axes)
+  vec2 q=vec2(ang*2.,abs(fract(z*.25)-.5)*4.-1.)*1.3;
+  float acc=0.,k=.72+fk+bass*.22;
+  for(int i=0;i<6;i++){q=abs(q)/clamp(dot(q,q),.12,1.5)-k;acc+=exp(-7.*abs(q.x*q.y));}
+  float g=abs(fract(z)-.5);
+  float ring=smoothstep(.45,.5,g)*(.25+high*1.4);
+  float spoke=smoothstep(.006,0.,(s*.5-fa)*r)*.7;
+  vec2 sc=vec2(ang*40.,z*8.);
+  float hs=h21(vec2(floor(sc.x),mod(floor(sc.y),512.))+N);
+  float star=step(.94,hs)*smoothstep(.45,0.,length(fract(sc)-.5))*(.6+high*2.5);
+  vec3 col=pal(acc*.08+z*.03+T*.02)*acc*.2;
+  col+=pal(.3+z*.05)*ring+pal(.6)*spoke;
+  col+=vec3(1.,.92,1.)*star;
+  col*=mix(.3,1.,smoothstep(0.,.35,r));
+  col+=pal(.1)*exp(-r*7.)*(.35+mid*1.6);          // the vanishing-point glow
+  col*=1.+bass*.7;
+  col=1.-exp(-col*1.25);
+  col=mix(col,vec3(1.),flash);
+  gl_FragColor=vec4(col,1.);
+}`;
+function sh(t,src){const s=gl.createShader(t);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(s);return s;}
+const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,VS));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(pr);gl.useProgram(pr);
+gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const loc=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+const U={};['R','look','T','trav','bass','mid','high','N','flash','fk','pa','pb','pd'].forEach(n=>U[n]=gl.getUniformLocation(pr,n));
+
+const SCALE = Math.min(devicePixelRatio||1, 1.5) * .75; // render scale: keeps phones smooth
+function resize(){cv.width=innerWidth*SCALE|0;cv.height=innerHeight*SCALE|0;gl.viewport(0,0,cv.width,cv.height);}
+addEventListener('resize',resize);resize();
+
+// ---------- Audio ----------
+let actx, analyser, freq, mode='idle', playlist=[], ti=0, mediaSrc;
+const player=document.getElementById('player');
+function ensureCtx(){
+  if(!actx){actx=new (window.AudioContext||window.webkitAudioContext)();analyser=actx.createAnalyser();analyser.fftSize=2048;analyser.smoothingTimeConstant=.75;freq=new Uint8Array(analyser.frequencyBinCount);}
+  if(actx.state==='suspended')actx.resume();
+}
+function bandAvg(lo,hi){
+  const hz=actx.sampleRate/analyser.fftSize;let a=Math.max(1,Math.floor(lo/hz)),b=Math.min(freq.length-1,Math.ceil(hi/hz)),s=0;
+  for(let i=a;i<=b;i++)s+=freq[i];return s/((b-a+1)*255);
+}
+function playTrack(i){
+  ti=(i+playlist.length)%playlist.length;
+  if(player.src)URL.revokeObjectURL(player.src);
+  player.src=URL.createObjectURL(playlist[ti]);player.play();
+  setTrack(playlist[ti].name.replace(/\.[^.]+$/,''),`Song ${ti+1} of ${playlist.length}`);
+}
+player.addEventListener('ended',()=>playTrack(ti+1));
+
+document.getElementById('files').addEventListener('change',e=>{
+  if(!e.target.files.length)return;
+  ensureCtx();playlist=[...e.target.files];
+  if(!mediaSrc){mediaSrc=actx.createMediaElementSource(player);mediaSrc.connect(analyser);analyser.connect(actx.destination);}
+  mode='file';document.getElementById('next').hidden=playlist.length<2;playTrack(0);begin();
+});
+document.getElementById('mic').onclick=async()=>{
+  try{ensureCtx();const st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    actx.createMediaStreamSource(st).connect(analyser); // not to speakers: avoids feedback
+    mode='mic';setTrack('Listening through your microphone','Play music out loud nearby');begin();
+  }catch(err){document.getElementById('err').textContent='Microphone access was blocked. Allow it in your browser settings, or choose songs instead.';}
+};
+document.getElementById('silent').onclick=()=>{mode='silent';setTrack('Drifting in silence','Add music to make the worlds move with it');begin();};
+document.getElementById('next').onclick=()=>playTrack(ti+1);
+document.getElementById('warp').onclick=()=>warp();
+
+function setTrack(t,s){document.getElementById('track').innerHTML='';const d=document.createElement('div');d.textContent=t;const m=document.createElement('small');m.textContent=s;document.getElementById('track').append(d,m);}
+function begin(){document.getElementById('start').style.display='none';showHud();}
+
+// ---------- HUD ----------
+const hud=document.getElementById('hud');let hudTimer;
+function showHud(){hud.classList.add('on');clearTimeout(hudTimer);hudTimer=setTimeout(()=>hud.classList.remove('on'),4000);}
+const chWrap=document.getElementById('chakras');
+const chEls=CHAKRAS.map(c=>{const el=document.createElement('div');el.className='ch';el.innerHTML=`<span>${c.name}</span><i style="--c:${c.c}"></i>`;chWrap.append(el);return el;});
+const note=document.createElement('div');note.id='chnote';note.textContent='Chakra colors are a symbolic frequency map, not a measurement';chWrap.prepend(note);
+
+// ---------- Warp between dimensions ----------
+let di=0, flash=0, lastWarp=0, cur=JSON.parse(JSON.stringify(DIMS[0]));
+const fm=document.getElementById('flashmsg');
+function setDimLabel(){document.getElementById('dn').textContent=DIMS[di].name;}
+function warp(){
+  di=(di+1)%DIMS.length;flash=1;lastWarp=performance.now();cur=JSON.parse(JSON.stringify(DIMS[di]));
+  setDimLabel();fm.textContent=DIMS[di].name;fm.style.transition='none';fm.style.opacity=1;
+  requestAnimationFrame(()=>{fm.style.transition='opacity 1.4s';fm.style.opacity=0;});
+}
+setDimLabel();
+
+// ---------- Steering (drag to look around) ----------
+let look=[0,0],lookT=[0,0],dragging=false,downAt=0;
+cv.addEventListener('pointerdown',e=>{dragging=true;downAt=performance.now();showHud();});
+addEventListener('pointerup',()=>{dragging=false;lookT=[0,0];});
+addEventListener('pointermove',e=>{if(!dragging)return;lookT=[(e.clientX/innerWidth-.5)*2,-(e.clientY/innerHeight-.5)*2];});
+let lastTap=0;cv.addEventListener('pointerup',()=>{const n=performance.now();if(n-lastTap<300)warp();lastTap=n;});
+
+// ---------- Loop ----------
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let t0=performance.now(),prev=t0,trav=0,sb=0,sm=0,sh2=0,bassAvg=.2,energyAvg=0;
+const lv=new Array(7).fill(0);
+function frame(now){
+  const dt=Math.min(.05,(now-prev)/1000);prev=now;const T=(now-t0)/1000;
+  let b=0,m=0,h=0;
+  if((mode==='file'||mode==='mic')&&analyser){
+    analyser.getByteFrequencyData(freq);
+    b=bandAvg(20,150);m=bandAvg(250,2000);h=bandAvg(4000,12000)*1.6;
+    CHAKRAS.forEach((c,i)=>lv[i]+=(bandAvg(c.lo,c.hi)*(1+i*.25)-lv[i])*.2);
+  }else{ // gentle synthetic breathing so silence still feels alive
+    b=.18+.22*Math.pow(Math.sin(T*.9)*.5+.5,3);m=.15+.1*Math.sin(T*.37);h=.1+.08*Math.sin(T*1.3);
+    CHAKRAS.forEach((c,i)=>lv[i]+=((.3+.3*Math.sin(T*.6+i))-lv[i])*.05);
+  }
+  sb+=(b-sb)*.35;sm+=(m-sm)*.2;sh2+=(h-sh2)*.3;
+  // auto-warp on a big drop: bass far above its recent average
+  bassAvg+=(sb-bassAvg)*.01;
+  if(mode!=='silent'&&sb>.42&&sb>bassAvg*1.55&&now-lastWarp>9000)warp();
+  if(mode==='silent'&&now-lastWarp>25000)warp();
+  const energy=(sb*1.2+sm+sh2)/3;energyAvg+=(energy-energyAvg)*.01;
+  trav=(trav+dt*(reduced?.15:(.25+energy*2.6)))%64;
+  flash=Math.max(0,flash-dt*2.2);
+  look[0]+=(lookT[0]-look[0])*.06;look[1]+=(lookT[1]-look[1])*.06;
+
+  // HUD: chakra dots + feel
+  let top=0;lv.forEach((v,i)=>{if(v>lv[top])top=i;chEls[i].querySelector('i').style.transform=`scale(${1+v*2.2})`;});
+  chEls.forEach((e,i)=>e.classList.toggle('top',i===top));
+  document.getElementById('mood').textContent= mode==='silent'?'Feels calm':
+    energyAvg<.12?'Feels calm':energyAvg<.22?'Feels flowing':energyAvg<.32?'Feels charged':'Feels euphoric';
+
+  gl.uniform2f(U.R,cv.width,cv.height);gl.uniform2f(U.look,look[0],look[1]);
+  gl.uniform1f(U.T,T);gl.uniform1f(U.trav,trav);
+  gl.uniform1f(U.bass,sb);gl.uniform1f(U.mid,sm);gl.uniform1f(U.high,sh2);
+  gl.uniform1f(U.N,cur.n);gl.uniform1f(U.flash,flash*.85);gl.uniform1f(U.fk,cur.k);
+  gl.uniform3fv(U.pa,cur.a);gl.uniform3fv(U.pb,cur.b);gl.uniform3fv(U.pd,cur.d);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

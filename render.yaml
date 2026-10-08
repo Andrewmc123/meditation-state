@@ -1,87 +1,47 @@
 # Render Blueprint - https://render.com/docs/blueprint-spec
 #
-# Meditation State is a pure static site: Vite emits index.html plus one JS
-# bundle, and everything else is data. There is no server, no API and no
-# database, so this is a single static service.
+# Dimensions is a single static page: public/index.html (WebGL + Web Audio,
+# no framework, no server, no build). Render just publishes the public/ folder.
 #
-# The build is unusual in one respect: roughly 110 MB of textures, catalogues
-# and character models are downloaded from Solar System Scope, the NASA
-# Exoplanet Archive, astronexus and the three.js repository at build time
-# rather than committed. Keeping that out of git keeps the history usable, and
-# every source is a stable public URL. A cold build measures about 60 seconds,
-# most of it download, and publishes ~38 MB.
-#
-# Deploy: push this file to the repo, then in Render choose
-# New > Blueprint and point it at the repository.
+# Deploy: in Render choose New > Blueprint and point it at this repository.
+# If the old meditation-state static site already exists, Render updates it in
+# place on the next deploy of this branch / main.
 
 services:
   - type: web
     name: meditation-state
     runtime: static
 
-    # No `plan` key. Static sites on Render have no compute plan - there is no
-    # instance behind them - and the validator rejects one outright with
-    # "no such plan free for service type web".
+    # No `plan` key: static sites have no compute plan, and the validator
+    # rejects one.
 
-    # build:deploy = assets && build-catalog --prune-8k && vite build
-    #   assets      downloads ~97 MB of 8K maps, the star catalogue and the
-    #               character models
-    #   --prune-8k  packs 119,626 stars into stars.bin, derives the 4K level
-    #               from each 8K map, then deletes the 8K sources it derived
-    # Measured from a clean clone: ~60 s, publishing ~38 MB. Every planet is a
-    # jump target, so no map is downgraded to 2K to save space.
-    buildCommand: npm ci && npm run build:deploy
-    staticPublishPath: ./dist
+    # Nothing to compile or download. Render still runs a build step, so keep
+    # it a no-op instead of the old npm install + 110 MB asset download.
+    buildCommand: echo "No build step - publishing public/"
+    staticPublishPath: ./public
 
-    # Only rebuild when something that affects the output changes. Docs and
-    # licence files do not.
     buildFilter:
       paths:
-        - src/**
-        - tools/**
-        - index.html
-        - vite.config.js
-        - package.json
-        - package-lock.json
+        - public/**
         - render.yaml
-      ignoredPaths:
-        - "**/*.md"
-
-    envVars:
-      # Match the local toolchain. Vite 8 and the build scripts use modern
-      # Node APIs, so do not let Render pick an older default.
-      - key: NODE_VERSION
-        value: "22"
-      # Skip Puppeteer/Chromium style postinstall work that nothing here needs.
-      - key: NPM_CONFIG_FUND
-        value: "false"
-      - key: NPM_CONFIG_AUDIT
-        value: "false"
 
     headers:
-      # Vite fingerprints the JS bundle, so it can be cached indefinitely.
-      - path: /assets/*
-        name: Cache-Control
-        value: public, max-age=31536000, immutable
-
-      # Textures, star binary and character models are large and effectively
-      # static, but their names are not fingerprinted - cache for a week and
-      # revalidate, so replacing a texture is picked up without a purge.
-      - path: /tex/*
-        name: Cache-Control
-        value: public, max-age=604800, must-revalidate
-      - path: /data/*
-        name: Cache-Control
-        value: public, max-age=604800, must-revalidate
-      - path: /models/*
-        name: Cache-Control
-        value: public, max-age=604800, must-revalidate
-
-      # The entry point must never be cached, or a deploy does not reach
-      # anyone who has already visited.
-      - path: /index.html
+      # One file, not fingerprinted: always revalidate so a deploy reaches
+      # everyone immediately.
+      - path: /*
         name: Cache-Control
         value: no-cache
+
+      # The page loads only its own inline code, the Syne font from Google
+      # Fonts, and audio from files the visitor picks (blob: URLs).
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; media-src 'self' blob:; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+
+      # "Use microphone" needs the mic; nothing else does.
+      - path: /*
+        name: Permissions-Policy
+        value: "microphone=(self), camera=(), geolocation=()"
 
       - path: /*
         name: X-Content-Type-Options
@@ -90,8 +50,5 @@ services:
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
 
-    # Single page, no client-side router: there is nothing to rewrite. A
-    # catch-all rewrite here would only mask genuine 404s, and the texture LOD
-    # depends on a missing 8K file actually returning 404 so it can walk down
-    # a level.
+    # Single page, no client-side routes: nothing to rewrite.
     routes: []
